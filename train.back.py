@@ -1,4 +1,4 @@
-from transformers import AutoModelForCausalLM, PreTrainedModel, AutoTokenizer, PretrainedConfig, AutoProcessor, AutoModel, Trainer, TrainingArguments
+from transformers import AutoModelForCausalLM, AutoConfig, AutoTokenizer, PretrainedConfig, AutoProcessor, AutoModel, Trainer, TrainingArguments
 from PIL import Image 
 import torch
 from torchvision import transforms
@@ -24,10 +24,10 @@ class VLMConfig(PretrainedConfig):
         self.image_pad_num = image_pad_num
         super().__init__(**kwargs)
 
-class VLM(PreTrainedModel):
+class VLM(PretrainedConfig):
     config_class = VLMConfig
-    def __init__(self, config: VLMConfig):
-        super().__init__(config)
+    def __init__(self, config: VLMConfig , **kwargs):
+        super().__init__(config = config)
         self.config = config
         self.vision_model = AutoModel.from_pretrained(config.vision_model_path)
         self.processor = AutoProcessor.from_pretrained(config.vision_model_path)
@@ -152,13 +152,22 @@ class MyDataCollator:
 
 if __name__ == '__main__':
     config = VLMConfig(vision_model_path='./model/siglip-so400m-patch14-384', image_pad_num=196)
-    model = VLM(config).cuda()
-    print(model)
-    print(f'模型参数数量: {sum(p.numel() for p in model.parameters())}')
     images_path = './dataset/LLaVA_CC3M-Pretrain-595k/images/sft_images'
     data_path = './dataset/Chinese-LLaVA-Vision-Instructions/LLaVA_CC3M_Chinese-Pretrain-595K/Chat-translated.json'
+    AutoConfig.register('vlm_model', VLMConfig)
+    AutoModelForCausalLM.register(VLMConfig, VLM)
+    model = AutoModelForCausalLM.from_pretrained('./save/pretrain', config=config)
+
+    for name, param in model.named_parameters():
+        if 'linear' in name or 'vision_model' in name:
+            param.requires_grad = False 
+        if 'llm_model' in name:
+            param.requires_grad = True
+    print(f'模型参数数量: {sum(p.numel() for p in model.parameters())}')
+    print(f'可训练参数数量: {sum(p.numel() for p in model.parameters() if p.requires_grad)}')
+
     tokenizer = AutoTokenizer.from_pretrained(config.llm_model_path)
-    processor = AutoTokenizer.from_pretrained(config.vision_model_path)
+    processor = AutoProcessor.from_pretrained(config.vision_model_path)
     output_dir = 'save/pretrain'
     args = TrainingArguments(
         output_dir=output_dir,
