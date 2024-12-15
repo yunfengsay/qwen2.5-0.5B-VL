@@ -1,0 +1,2 @@
+modelscope download --model "fireicewolf/siglip-so400m-patch14-384" --local_dir "model/siglip-so400m-patch14-384"
+modelscope download --model "Qwen/Qwen2.5-0.5B-Instruct" --local_dir "model/Qwen2.5-0.5B-Instruct"
