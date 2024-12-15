@@ -13,8 +13,8 @@ from typing import List, Dict, Any
 class VLMConfig(PretrainedConfig):
     model_type = "vlm_model"
     def __init__(self, 
-        llm_model_path: str = 'Qwen/Qwen2.5-0.5B-Instruct',
-        vision_model_path: str = 'google/siglip-so400m-patch14-384',
+        llm_model_path: str = './model/Qwen2.5-0.5B-Instruct',
+        vision_model_path: str = './model/siglip-so400m-patch14-384',
         freeze_vision_model: bool = True,
         image_pad_num = 49,
         **kwargs):
@@ -27,10 +27,11 @@ class VLMConfig(PretrainedConfig):
 class VLM(PretrainedConfig):
     config_class = VLMConfig
     def __init__(self, config: VLMConfig):
+        super().__init__(config)
         self.config = config
         self.vision_model = AutoModel.from_pretrained(config.vision_model_path)
+        self.processor = AutoProcessor.from_pretrained(config.vision_model_path)
         self.llm_model = AutoModelForCausalLM.from_pretrained(config.llm_model_path)
-        self.image_processor = AutoProcessor.from_pretrained(config.vision_model_path)
         self.tokenizer = AutoTokenizer.from_pretrained(config.llm_model_path)
         self.linear1 = nn.Linear(self.vision_model.config.vision_config.hidden_size * 4, self.llm_model.config.hidden_size)
         self.linear2 = nn.Linear(self.llm_model.config.hidden_size, self.llm_model.config.hidden_size)
@@ -40,7 +41,6 @@ class VLM(PretrainedConfig):
                 param.requires_grad = False
         for param in self.llm_model.parameters():
             param.requires_grad = False
-        super().__init__(config)
 
     def forward(self, input_ids, labels, pixel_values, attention_mask = None):
         text_embeds = self.llm_model.get_input_embeddings()[input_ids]
@@ -151,7 +151,7 @@ class MyDataCollator:
         }
 
 if __name__ == '__main__':
-    config = VLMConfig(vision_model_path='google/siglip-so400m-patch14-384', image_pad_num=196)
+    config = VLMConfig(vision_model_path='./model/siglip-so400m-patch14-384', image_pad_num=196)
     model = VLM(config)
     print(model)
     print(f'模型参数数量: {sum(p.numel() for p in model.parameters())}')
