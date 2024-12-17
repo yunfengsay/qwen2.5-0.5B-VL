@@ -33,7 +33,7 @@ class VLM(PreTrainedModel):
         self.processor = AutoProcessor.from_pretrained(config.vision_model_path)
         self.llm_model = AutoModelForCausalLM.from_pretrained(config.llm_model_path)
         self.tokenizer = AutoTokenizer.from_pretrained(config.llm_model_path)
-        self.linear1 = nn.Linear(self.vision_model.config.vision_config.hidden_size * 4, self.llm_model.config.hidden_size)
+        self.linear1 = nn.Linear(self.vision_model.config.vision_config.hidden_size, self.llm_model.config.hidden_size)
         self.linear2 = nn.Linear(self.llm_model.config.hidden_size, self.llm_model.config.hidden_size)
 
         if self.config.freeze_vision_model:
@@ -43,10 +43,12 @@ class VLM(PreTrainedModel):
             param.requires_grad = False
 
     def forward(self, input_ids, labels, pixel_values, attention_mask = None):
-        text_embeds = self.llm_model.get_input_embeddings()[input_ids]
+        text_embeds = self.llm_model.get_input_embeddings()(input_ids)
         image_embeds = self.vision_model.vision_model(pixel_values).last_hidden_state
         b,s,d = image_embeds.shape
-        image_embeds = image_embeds.view(b, -1, d*4)
+        # [8, 729, 1152]
+        image_embeds = image_embeds.view(b, -1, d)
+
         image_features = self.linear2(F.silu(self.linear1(image_embeds)))
 
         text_embeds = text_embeds.to(image_features.dtype)
@@ -54,10 +56,10 @@ class VLM(PreTrainedModel):
         inputs_embeds = self.merge_input_ids_with_image_features(image_features, text_embeds, input_ids)
         outputs = self.llm_model(inputs_embeds=inputs_embeds, attention_mask=attention_mask)
         logists = outputs[0]
-        loos = None
+        loss = None
         if labels is not None:
-            loos_fact = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)
-            loss = loos_fact(logists.view(-1, logists.size(-1)), labels.view(-1).to(logists.dtype))
+            loss_fact = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)
+            loss = loss_fact(logists.view(-1, logists.size(-1)), labels.view(-1).to(logists.dtype))
 
         return CausalLMOutputWithPast(loss=loss, logits=logists)
     def merge_input_ids_with_image_features(self, image_features, inputs_embeds, input_ids):
@@ -141,13 +143,13 @@ class MyDataCollator:
         pixel_values = []
         for feature in features:
             input_ids.append(feature['input_ids'] + [self.tokenizer.pad_token_id] * (max_len - len(feature['input_ids'])))
-            labels.append(features['labels'] + [self.tokenizer.pad_token_id] * (max_len - len(feature['labels'])))
+            labels.append(feature['labels'] + [self.tokenizer.pad_token_id] * (max_len - len(feature['labels'])))
             pixel_values.append(feature['pixel_values'])
 
         return {
             'input_ids': torch.tensor(input_ids, dtype=torch.long),
             'labels': torch.tensor(labels, dtype=torch.long),
-            'pixel_values': torch.tensor(pixel_values, dim=0),
+            'pixel_values': torch.cat(pixel_values, dim=0),
         }
 
 if __name__ == '__main__':
@@ -158,7 +160,7 @@ if __name__ == '__main__':
     images_path = './dataset/LLaVA_CC3M-Pretrain-595k/images/sft_images'
     data_path = './dataset/Chinese-LLaVA-Vision-Instructions/LLaVA_CC3M_Chinese-Pretrain-595K/Chat-translated.json'
     tokenizer = AutoTokenizer.from_pretrained(config.llm_model_path)
-    processor = AutoTokenizer.from_pretrained(config.vision_model_path)
+    processor = AutoProcessor.from_pretrained(config.vision_model_path)
     output_dir = 'save/pretrain'
     args = TrainingArguments(
         output_dir=output_dir,
@@ -171,7 +173,7 @@ if __name__ == '__main__':
         fp16=True,
         gradient_accumulation_steps=8,
         logging_steps = 100,
-        report_to='transorboard',
+        report_to='tensorboard',
         dataloader_pin_memory=True,
         dataloader_num_workers=1,
     )
